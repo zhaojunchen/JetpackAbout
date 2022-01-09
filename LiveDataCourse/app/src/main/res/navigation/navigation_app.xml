@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/navigation_app.xml"
+    app:startDestination="@id/AFragment">
+
+    <fragment
+        android:id="@+id/AFragment"
+        android:name="cn.zhaojunchen.livedatacourse.AFragment"
+        android:label="a_fragment"
+        tools:layout="@layout/a_fragment">
+        <action
+            android:id="@+id/action_AFragment_to_BFragment"
+            app:destination="@id/BFragment" />
+    </fragment>
+    <fragment
+        android:id="@+id/BFragment"
+        android:name="cn.zhaojunchen.livedatacourse.BFragment"
+        android:label="b_fragment"
+        tools:layout="@layout/b_fragment">
+        <action
+            android:id="@+id/action_BFragment_to_CFragment"
+            app:destination="@id/CFragment" />
+    </fragment>
+    <fragment
+        android:id="@+id/CFragment"
+        android:name="cn.zhaojunchen.livedatacourse.CFragment"
+        android:label="c_fragment"
+        tools:layout="@layout/c_fragment" />
+</navigation>

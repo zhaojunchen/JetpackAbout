@@ -83,3 +83,6 @@ lint/generated/
 lint/outputs/
 lint/tmp/
 # lint/reports/
+LiveDataCourse/.idea/compiler.xml
+LiveDataCourse/.idea/gradle.xml
+LiveDataCourse/.idea/misc.xml
