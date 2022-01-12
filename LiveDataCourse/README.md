@@ -2,9 +2,9 @@
 
 [TOC]
 
-### 1、 抛转引玉
+### 0、导读
 
-本文将从LiveData功能的角度去分析LiveData的源码， 回答以下问题
+本文将从LiveData功能的角度去分析LiveData的源码， 回答以下问题：
 
 1. LiveData何时会刷新?
    1. 为什么通过`setValue`会开始刷新
@@ -15,13 +15,34 @@
    1. LiveData observe如何和Lifecycle高度结合
    2. Livedata自动绑定和取消
 
-问题1、2存在部分的重叠，但是阐述的角度不同，我会在每一小节做出总结并和上述问题关联起来，解答疑问。TIPS：本文需要对`Lifecycle` 有一定的了解（笔者会穿插部分这些知识、便于理解）！  
+### 1、 抛转引玉
 
-**文献阅读时请同步打开IDE LiveData源码**
+ **LiveData观察者何时会执行onChange方法？**
 
-### 2、 LiveData何时会刷新？
+先说结论:
 
-#### 1、LiveData的构造函数
+- 对于**observe**方法添加的观察者 ( `void observe(@NonNull LifecycleOwner owner, @NonNull Observer<? super T> observer) `)
+  - 当调用`setValue`方法，会将本次的`value`变更分发到所有处在活跃（(生命周期至少为**START**)）的观察者 ， 非活跃状态的观察者丢弃本次`value`变更
+  - `observe` 方法执行时，会（隐式地、通过生命周期观察者监听）执行一次, 可以简单认为`observe` 调用后、一旦对应生命周期转到**START**状态，必定执行一次（即便是添加监听时处在**INITIAL**状态）
+- 对于**observeForever**方法添加的观察者( `void observeForever(@NonNull Observer<? super T> observer)`)
+  - 当调用setValue方法，立即刷新 （没有生命周期的相关限制）
+  - `observeForever` 方法执行时，会显示调用一次
+
+**（PS: 后期除非强调，默认为observe方法添加的带有生命周期的观察者）**
+
+
+
+**LiveData为何很难 “内存泄露”？他是如何和生命周期高度绑定?**
+
+内存泄露常见于生命周期组件（Activity、Fragment等），当这些组件销毁时，我们需要清除组件中已经存在的任务（回调、线程等）避免内存泄露。LiveData作为为UI服务的组件，生命周期对他的重要性不言而喻。因此为避免内存泄露，我们需要在`Activity/Fragment`销毁的时候移除这些带有`onChange`执行逻辑的LiveData观察者。  `Lifecycle` 那一套组件就是干这事情就很能手, 事实上LiveData高度依赖这个`Lifecycle` , 在LiveData添加的观察者会被封装为 `LifecycleBoundObserver` （实现了 `LifecycleEventObserver` 接口）,  这个观察者会被添加到LiveData时，会自动的将这个 **包装之后的观察者** 绑定到`Lifecycle`， 在`DESTROY`时被自动移除, **因此只要添加正确的生命周期，它就不会泄露**
+
+
+
+**TIPS：本文需要对`Lifecycle` 有一定的了解。**
+
+### 2、 源码分析
+
+#### 1、构造函数及相关成员
 
 LiveData的2个构造函数，一个带参数，一个不带参数。其中 `mData`显然就是它真实存储的对象，也即是我们设置的`Value`, 但是这里有个`mVersion` 成员是什么？ 先说结论： 他是记录LiveData刷新次数的一个变量，只在构造函数和 `setValue`中变化（全局搜一下即可），部分刷新的逻辑需要用到它。然后看一下这个`NOT_SET`默认值，这个是静态变量，给LiveData无参构造函数用的，没什么实际的意义。
 
@@ -113,7 +134,7 @@ public interface Observer<T> {
 
  
 
-**这一点的区别需要特别注意：** 例如你需要网络请求返回一个点赞数并显示到页面， 你可能有一下2中做法：
+**这一点的区别需要特别注意：** 例如你需要网络请求返回一个点赞数并显示到页面， 你可能有一下二种做法：
 
 ```
 class AViewModel : ViewModel() {
@@ -156,7 +177,7 @@ override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
 
 
 
-`likes` 会立即将0显示在界面上，而`likes1` 知道网络返回之后才会显示数据   **为什么likes会立马刷新数据在后面会提到**
+`likes` 会立即将0显示在界面上，而`likes1`直到网络返回之后才会显示数据   **为什么likes会立马刷新数据在后面会提到**
 
 
 
