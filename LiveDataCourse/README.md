@@ -1,4 +1,4 @@
-## LiveData
+## 带着问题分析LiveData源码
 
 [TOC]
 
@@ -14,9 +14,7 @@
    
 2. LiveData和生命周期组件的绑定关系
    1. LiveData observe如何和Lifecycle高度结合
-   
    2. Livedata自动绑定和取消
-   
       
 
 ### 1、 抛转引玉
@@ -50,12 +48,12 @@ LiveData的2个构造函数，一个带参数，一个不带参数。其中 `mDa
 
 ```
 public abstract class LiveData<T> {
-	// 起始版本号
+    // 起始版本号
     static final int START_VERSION = -1;
     @SuppressWarnings("WeakerAccess") /* synthetic access */
     // 无参构造时value的默认值
     static final Object NOT_SET = new Object();
-	// 存储LiveData的观察者集合，观察者是ObserverWrapper类型（经过包装的Observe对象）
+    // 存储LiveData的观察者集合，观察者是ObserverWrapper类型（经过包装的Observe对象）
     private SafeIterableMap<Observer<? super T>, ObserverWrapper> mObservers =
             new SafeIterableMap<>();
     // how many observers are in active state
@@ -92,14 +90,14 @@ public abstract class LiveData<T> {
 `LiveData.getValue` 其Value可能为空， **大家千万要注意这一点(不然!!操作可能出现NPE问题)**
 
 ```
-	@Nullable
-    public T getValue() {
-        Object data = mData;
-        if (data != NOT_SET) {
-            return (T) data;
-        }
-        return null;
+@Nullable
+public T getValue() {
+    Object data = mData;
+    if (data != NOT_SET) {
+        return (T) data;
     }
+    return null;
+}
 ```
 
 
@@ -170,44 +168,43 @@ class AViewModel : ViewModel() {
 }
 ```
 
-Fragment中添加监听
+Fragment中添加监听:
 
 ```
 override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
-        viewModel.requestLikes()
-        // Add observe
-        viewModel.likes.observe(viewLifecycleOwner) {
-            binding.tv2.text = it.toString()
-        }
-
-        viewModel.likes1.observe(viewLifecycleOwner) {
-            binding.tv3.text = it.toString()
-        }
-
+    super.onViewCreated(view, savedInstanceState)
+    viewModel.requestLikes()
+    // Add observe
+    viewModel.likes.observe(viewLifecycleOwner) {
+        binding.tv2.text = it.toString()
     }
+
+    viewModel.likes1.observe(viewLifecycleOwner) {
+        binding.tv3.text = it.toString()
+    }
+}
 ```
 
-`likes1` 会立即将0显示在界面上，而`likes1`直到网络返回之后才会显示数据，这个时候可能需要你去决定没有网络数据时应该显示什么?  **为什么likes会立马刷新数据在后面会提到。**
+`likes1` 会立即将0显示在界面上，而`likes1`直到网络返回之后才会显示数据，这个时候可能需要你去决定没有网络数据时应该显示什么?  **为什么likes1会立马刷新数据在后面会提到。**
 
 #### 2、 刷新逻辑分析
 
 首先从 `setValue` &&  `observe` 这个2个API入手分析：
 
-查看`setValue` 源码，首先是`@MainThread` 注解限制只能是主线程调用 `setValue` （子线程更新请使用`postValue` 方法）, 然后是版本号mVersion和mData的更新, 最后是对 `value`更新事件进行分发，调用的方法为 `dispatchingValue`
+查看`setValue` 源码，首先是`@MainThread` 注解限制只能是主线程调用 `setValue` （子线程更新请使用`postValue` 方法）, 然后是版本号`mVersion`和`mData`的更新, 最后是对 `value`更新事件进行分发，调用的方法为 `dispatchingValue`
 
 ```
- 	@MainThread
-    protected void setValue(T value) {
-        assertMainThread("setValue");
-        mVersion++;
-        mData = value;
-        dispatchingValue(null);
-    }
+@MainThread
+protected void setValue(T value) {
+    assertMainThread("setValue");
+    mVersion++;
+    mData = value;
+    dispatchingValue(null);
+}
     
 ```
 
-**PS：**实际上`postValue` 也是通过主线程的`Handler`将更新任务调度到主线程，然后执行`setValue` ， 所以后面就不再说`postValue`了。
+**PS：** 实际上`postValue` 也是通过主线程的`Handler`将更新任务调度到主线程，然后执行`setValue` ， 所以后面就不再说`postValue`了。
 
 ```
  // postValue 的Runnable, 通过handler分发到主线程
@@ -237,32 +234,32 @@ override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
  }
 ```
 
-跟踪 `dispatchingValue` 并全局搜索它， 发现只有2中调用方式 1、传入 `initiator=null` 对`mObservers` 所有观察者进行分发， 2、 传某个具体的`ObserverWrapper` , 仅仅针对这一个特定的观察者进行分发，显然通过`setValue`更新`value`时需要传入`null`，实现对全部观察者的分发， 对于observe方法的更新（先剧透一下）是传递那个指定的`ObserverWrapper` 作为参数， 实现单个观察者的onChange触发。
+跟踪 `dispatchingValue` 并全局搜索它， 发现只有2中调用方式 1、传入 `initiator=null` 对`mObservers` 所有观察者进行分发， 2、 传某个具体的`ObserverWrapper` , 仅仅针对这一个特定的观察者进行分发，显然通过`setValue`更新`value`时需要传入`null`，实现对全部观察者的分发， 对于observe方法的更新（先剧透一下）是传递那个指定的`ObserverWrapper` 作为参数，实现单个观察者的onChange触发。
 
 ```
 void dispatchingValue(@Nullable ObserverWrapper initiator) {
-        if (mDispatchingValue) {
-            mDispatchInvalidated = true;
-            return;
-        }
-        mDispatchingValue = true;
-        do {
-            mDispatchInvalidated = false;
-            if (initiator != null) {
-                considerNotify(initiator);
-                initiator = null;
-            } else {
-                for (Iterator<Map.Entry<Observer<? super T>, ObserverWrapper>> iterator =
-                        mObservers.iteratorWithAdditions(); iterator.hasNext(); ) {
-                    considerNotify(iterator.next().getValue());
-                    if (mDispatchInvalidated) {
-                        break;
-                    }
+    if (mDispatchingValue) {
+        mDispatchInvalidated = true;
+        return;
+    }
+    mDispatchingValue = true;
+    do {
+        mDispatchInvalidated = false;
+        if (initiator != null) {
+            considerNotify(initiator);
+            initiator = null;
+        } else {
+            for (Iterator<Map.Entry<Observer<? super T>, ObserverWrapper>> iterator =
+                    mObservers.iteratorWithAdditions(); iterator.hasNext(); ) {
+                considerNotify(iterator.next().getValue());
+                if (mDispatchInvalidated) {
+                    break;
                 }
             }
-        } while (mDispatchInvalidated);
-        mDispatchingValue = false;
-    }
+        }
+    } while (mDispatchInvalidated);
+    mDispatchingValue = false;
+}
 ```
 
 进入函数之后 `mDispatchingValue` 立即设置正在更新， 循环体中根据 `initiator` 判断是进行单个分发还是全部分发，具体到单个`ObserverWrapper`的分发逻辑都是一样的， 为啥整成 `do-while`  循环？？？ 猜测是 `dispatchingValue`还未执行完毕时就（**出于某种情况**）再次在此调用`dispatchingValue`， 首先检测到 `mDispatchingValue==true`, 立马设置 `mDispatchInvalidated=true`, 首先`mDispatchInvalidated`会导致for循环体立即退出，其次会导致`while`循环体再次执行一次！ **出于某种情况** 还不知道是啥情况😁 有兴趣可以挖一下，大致表达的就上面的意思。
@@ -273,25 +270,25 @@ void dispatchingValue(@Nullable ObserverWrapper initiator) {
 
 ```
 private void considerNotify(ObserverWrapper observer) {
-        // ObserverWrapper 是否激活
-        if (!observer.mActive) {
-            return;
-        }
-        // Check latest state b4 dispatch. Maybe it changed state but we didn't get the event yet.
-        //
-        // we still first check observer.active to keep it as the entrance for events. So even if
-        // the observer moved to an active state, if we've not received that event, we better not
-        // notify for a more predictable notification order.
-        if (!observer.shouldBeActive()) {
-            observer.activeStateChanged(false);
-            return;
-        }
-        if (observer.mLastVersion >= mVersion) {
-            return;
-        }
-        observer.mLastVersion = mVersion;
-        observer.mObserver.onChanged((T) mData);
+    // ObserverWrapper 是否激活
+    if (!observer.mActive) {
+        return;
     }
+    // Check latest state b4 dispatch. Maybe it changed state but we didn't get the event yet.
+    //
+    // we still first check observer.active to keep it as the entrance for events. So even if
+    // the observer moved to an active state, if we've not received that event, we better not
+    // notify for a more predictable notification order.
+    if (!observer.shouldBeActive()) {
+        observer.activeStateChanged(false);
+        return;
+    }
+    if (observer.mLastVersion >= mVersion) {
+        return;
+    }
+    observer.mLastVersion = mVersion;
+    observer.mObserver.onChanged((T) mData);
+}
 ```
 
 `shouldBeActive` 是`ObserverWrapper`的抽象方法：具体的实现在`AlwaysActiveObserver`(对应于`ObserveForever`) 和 `LifecycleBoundObserver` （对应于`observe`）, 前者始终是 `shouldBeActive=true` ，后者只会在`Lifecycle`对应的状态为至少`STARTED`，才会变为 `shouldBeActive=true`
@@ -336,16 +333,16 @@ class LifecycleBoundObserver extends ObserverWrapper implements LifecycleEventOb
 前面提到了`onChange`, 其实就是我们编写的**观察者方法** , 下面看一下片段，如何添加观察者： 
 
 ```
-		// kotlin语法糖简化版本
-		viewModel.likes.observe(viewLifecycleOwner) {
-            binding.tv2.text = it.toString()
-        }
-		// 原始版本
-        viewModel.likes.observe(viewLifecycleOwner, object : Observer<Int> {
-            override fun onChanged(t: Int?) {
-                binding.tv2.text = t.toString()
-            }
-        })
+// kotlin语法糖简化版本
+viewModel.likes.observe(viewLifecycleOwner) {
+    binding.tv2.text = it.toString()
+}
+// 原始版本
+viewModel.likes.observe(viewLifecycleOwner, object : Observer<Int> {
+    override fun onChanged(t: Int?) {
+        binding.tv2.text = t.toString()
+    }
+})
 ```
 
 实际上添加的是`Observer`接口实例， 本身就只是 保存了 **数据刷新（onChange）** 这个**单一职责**
@@ -548,71 +545,71 @@ void activeStateChanged(boolean newActive) {
 源码分析的时候，我在想 `onStateChanged` **何时会触发**？ 比如说： 我在`Activity onRusume`方法去添加`LiveData`观察者，最终走到 ` owner.getLifecycle().addObserver(wrapper);`
 
 ```
-	@MainThread
-    public void observe(@NonNull LifecycleOwner owner, @NonNull Observer<? super T> observer) {
-        xxx
-        LifecycleBoundObserver wrapper = new LifecycleBoundObserver(owner, observer);
-        xxx
-        owner.getLifecycle().addObserver(wrapper);
-    }
+@MainThread
+public void observe(@NonNull LifecycleOwner owner, @NonNull Observer<? super T> observer) {
+    xxx
+    LifecycleBoundObserver wrapper = new LifecycleBoundObserver(owner, observer);
+    xxx
+    owner.getLifecycle().addObserver(wrapper);
+}
 ```
 
 即是我是在`RESUME`状态才添加观察者， 但是之后的`Activity`一直处在`RESUME`状态时候，岂不是不会执行`onStateChanged`方法(因为此时状态没有变化：`RESUME->RESUME`)，从而导致在`onResume`中绑定的`LiveData`就只能响应`setValue`方法，而无法直接在接在observe方法观察到最新的数据？我想了下这和之前LiveData的用法不相符合, 后来试了一下，发现 **不管何时添加调用**`observe` , `onStateChanged` 始终都会从开始状态流转到当前状态
 
 ```
-	override fun onResume() {
-        super.onResume()
-        lifecycle.addObserver(testLife)
-    }
+override fun onResume() {
+    super.onResume()
+    lifecycle.addObserver(testLife)
+}
 
-    val testLife = object : LifecycleEventObserver {
-        override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
-            Log.d("LifecycleEventObserver", "${source.lifecycle.currentState}:$event")
-        }
+val testLife = object : LifecycleEventObserver {
+    override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
+        Log.d("LifecycleEventObserver", "${source.lifecycle.currentState}:$event")
     }
+}
 ```
 
 这一块的逻辑在这里：`LifecycleRegistry.addObserver` ， `while`循环会分发`dispatchEvent`直到分发到`targetState` , 核心类为：`ObserverWithState statefulObserver = new ObserverWithState(observer, initialState);`  `initialState` 可以看到在非`DESTROYED` 时候是`INITIALIZED`, 然后在`while`循环中和`targetState` (当前状态)比较并且分发这个状态 `dispatchEvent` , **如当前我在RESUME状态添加LiveData观察者，但是他会从INITIALIZED一直分发的RESUME，并且分别依次调用LifecycleBoundObserver的onStateChanged方法，当分发到STARTED状态时,`activeStateChanged(shouldBeActive());` 成功执行，最终调用到`dispatchingValue(this);`, 立即触发一次`onChange`**
 
 ```
 	@Override
-    public void addObserver(@NonNull LifecycleObserver observer) {
-        enforceMainThreadIfNeeded("addObserver");
-        State initialState = mState == DESTROYED ? DESTROYED : INITIALIZED;
-        ObserverWithState statefulObserver = new ObserverWithState(observer, initialState);
-        ObserverWithState previous = mObserverMap.putIfAbsent(observer, statefulObserver);
+public void addObserver(@NonNull LifecycleObserver observer) {
+    enforceMainThreadIfNeeded("addObserver");
+    State initialState = mState == DESTROYED ? DESTROYED : INITIALIZED;
+    ObserverWithState statefulObserver = new ObserverWithState(observer, initialState);
+    ObserverWithState previous = mObserverMap.putIfAbsent(observer, statefulObserver);
 
-        if (previous != null) {
-            return;
-        }
-        LifecycleOwner lifecycleOwner = mLifecycleOwner.get();
-        if (lifecycleOwner == null) {
-            // it is null we should be destroyed. Fallback quickly
-            return;
-        }
-
-        boolean isReentrance = mAddingObserverCounter != 0 || mHandlingEvent;
-        State targetState = calculateTargetState(observer);
-        mAddingObserverCounter++;
-        while ((statefulObserver.mState.compareTo(targetState) < 0
-                && mObserverMap.contains(observer))) {
-            pushParentState(statefulObserver.mState);
-            final Event event = Event.upFrom(statefulObserver.mState);
-            if (event == null) {
-                throw new IllegalStateException("no event up from " + statefulObserver.mState);
-            }
-            statefulObserver.dispatchEvent(lifecycleOwner, event);
-            popParentState();
-            // mState / subling may have been changed recalculate
-            targetState = calculateTargetState(observer);
-        }
-
-        if (!isReentrance) {
-            // we do sync only on the top level.
-            sync();
-        }
-        mAddingObserverCounter--;
+    if (previous != null) {
+        return;
     }
+    LifecycleOwner lifecycleOwner = mLifecycleOwner.get();
+    if (lifecycleOwner == null) {
+        // it is null we should be destroyed. Fallback quickly
+        return;
+    }
+
+    boolean isReentrance = mAddingObserverCounter != 0 || mHandlingEvent;
+    State targetState = calculateTargetState(observer);
+    mAddingObserverCounter++;
+    while ((statefulObserver.mState.compareTo(targetState) < 0
+            && mObserverMap.contains(observer))) {
+        pushParentState(statefulObserver.mState);
+        final Event event = Event.upFrom(statefulObserver.mState);
+        if (event == null) {
+            throw new IllegalStateException("no event up from " + statefulObserver.mState);
+        }
+        statefulObserver.dispatchEvent(lifecycleOwner, event);
+        popParentState();
+        // mState / subling may have been changed recalculate
+        targetState = calculateTargetState(observer);
+    }
+
+    if (!isReentrance) {
+        // we do sync only on the top level.
+        sync();
+    }
+    mAddingObserverCounter--;
+}
 ```
 
 
